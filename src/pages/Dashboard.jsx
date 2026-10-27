@@ -1,4 +1,3 @@
-
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "motion/react";
@@ -36,64 +35,23 @@ const CONTENT = {
   driver: {
     heading: "Your driving activity at a glance.",
     stats: [
-      { label: "Rides today", value: "8" },
-      { label: "Today's earnings", value: "₦146,500" },
-      { label: "Driver rating", value: "4.9 / 5" },
+      { label: "Rides today", value: "0" },
+      { label: "Today's earnings", value: "₦0" },
+      { label: "Driver rating", value: "Not rated" },
     ],
     listTitle: "Recent rides",
-    list: [
-      {
-        main: "Jordan Lee",
-        sub: "Airport pickup → Downtown",
-        side: "₦28,500",
-      },
-      {
-        main: "Sam Taylor",
-        sub: "Riverside → Central Station",
-        side: "₦17,500",
-      },
-      {
-        main: "Casey Morgan",
-        sub: "North Park → Market Square",
-        side: "₦12,500",
-      },
-      {
-        main: "Riley Chen",
-        sub: "City Centre → Westside",
-        side: "₦21,250",
-      },
-    ],
+    list: [],
   },
+
   passenger: {
     heading: "Your journeys, all in one place.",
     stats: [
-      { label: "Next pickup", value: "10:30 AM" },
-      { label: "Rides this month", value: "6" },
-      { label: "Saved places", value: "3" },
+      { label: "Next pickup", value: "—" },
+      { label: "Rides this month", value: "0" },
+      { label: "Saved places", value: "0" },
     ],
     listTitle: "Recent trips",
-    list: [
-      {
-        main: "Home → City Centre",
-        sub: "Today · Driver: Alex",
-        side: "₦14,200",
-      },
-      {
-        main: "Airport → Home",
-        sub: "Mon · Driver: Jamie",
-        side: "₦32,800",
-      },
-      {
-        main: "Office → Riverside",
-        sub: "Fri · Driver: Morgan",
-        side: "₦18,400",
-      },
-      {
-        main: "Market Square → Home",
-        sub: "Wed · Driver: Taylor",
-        side: "₦11,600",
-      },
-    ],
+    list: [],
   },
 };
 
@@ -130,11 +88,82 @@ const pageSequence = {
   },
 };
 
+// Convert Firestore timestamps into milliseconds.
+function getRideTime(ride) {
+  const timestamp =
+    ride.completedAt ||
+    ride.updatedAt ||
+    ride.acceptedAt ||
+    ride.createdAt;
+
+  if (timestamp?.toMillis) {
+    return timestamp.toMillis();
+  }
+
+  if (timestamp?.seconds) {
+    return timestamp.seconds * 1000;
+  }
+
+  if (typeof timestamp === "string") {
+    const parsed = new Date(timestamp).getTime();
+    return Number.isNaN(parsed) ? 0 : parsed;
+  }
+
+  return 0;
+}
+
+// Check whether a ride belongs to today's date.
+function isToday(ride) {
+  const timestamp =
+    ride.completedAt ||
+    ride.updatedAt ||
+    ride.createdAt;
+
+  let rideDate;
+
+  if (timestamp?.toDate) {
+    rideDate = timestamp.toDate();
+  } else if (timestamp?.seconds) {
+    rideDate = new Date(timestamp.seconds * 1000);
+  } else if (timestamp) {
+    rideDate = new Date(timestamp);
+  } else {
+    return false;
+  }
+
+  if (Number.isNaN(rideDate.getTime())) {
+    return false;
+  }
+
+  const today = new Date();
+
+  return (
+    rideDate.getFullYear() === today.getFullYear() &&
+    rideDate.getMonth() === today.getMonth() &&
+    rideDate.getDate() === today.getDate()
+  );
+}
+
+// Get the ride fare safely.
+function getRideFare(ride) {
+  const fare =
+    ride.finalFare ??
+    ride.agreedFare ??
+    ride.offeredFare ??
+    ride.fare ??
+    0;
+
+  const amount = Number(fare);
+
+  return Number.isFinite(amount) ? amount : 0;
+}
+
 export default function Dashboard({ role }) {
   const { user, profile, logOut } = useAuth();
   const navigate = useNavigate();
 
   const [sosAlertCount, setSosAlertCount] = useState(0);
+  const [driverRideRecords, setDriverRideRecords] = useState([]);
   const [signingOut, setSigningOut] = useState(false);
 
   const firstName =
@@ -142,8 +171,11 @@ export default function Dashboard({ role }) {
       ? "Admin"
       : (profile?.displayName || user?.email || "User").split(" ")[0];
 
+  // Listen for admin SOS alerts.
   useEffect(() => {
-    if (role !== "admin") return undefined;
+    if (role !== "admin") {
+      return undefined;
+    }
 
     const unsubscribe = onSnapshot(
       collection(db, "rides"),
@@ -161,6 +193,103 @@ export default function Dashboard({ role }) {
 
     return unsubscribe;
   }, [role]);
+
+  // Listen for the driver's rides in Firestore.
+  useEffect(() => {
+    if (role !== "driver" || !user?.uid) {
+      setDriverRideRecords([]);
+      return undefined;
+    }
+
+    const unsubscribe = onSnapshot(
+      collection(db, "rides"),
+      (snapshot) => {
+        const rides = snapshot.docs
+          .map((rideDoc) => ({
+            id: rideDoc.id,
+            ...rideDoc.data(),
+          }))
+          .filter((ride) => ride.driverId === user.uid)
+          .filter((ride) => {
+            const status = String(ride.status || "").toLowerCase();
+
+            return [
+              "accepted",
+              "driving_to_pickup",
+              "in_progress",
+              "completed",
+            ].includes(status);
+          })
+          .sort((a, b) => getRideTime(b) - getRideTime(a));
+
+        setDriverRideRecords(rides);
+      },
+      (error) => {
+        console.error("Unable to load driver rides:", error);
+      }
+    );
+
+    return unsubscribe;
+  }, [role, user?.uid]);
+
+  // Only completed rides from today count as today's rides.
+  const completedToday = driverRideRecords.filter((ride) => {
+    const status = String(ride.status || "").toLowerCase();
+
+    return status === "completed" && isToday(ride);
+  });
+
+  // Calculate today's earnings from completed rides.
+  const todaysEarnings = completedToday.reduce(
+    (total, ride) => total + getRideFare(ride),
+    0
+  );
+
+  // Driver dashboard statistics.
+  const driverStats = [
+    {
+      label: "Rides today",
+      value: String(completedToday.length),
+    },
+    {
+      label: "Today's earnings",
+      value: `₦${todaysEarnings.toLocaleString("en-NG")}`,
+    },
+    {
+      label: "Driver rating",
+      value:
+        profile?.rating != null
+          ? `${Number(profile.rating).toFixed(1)} / 5`
+          : "Not rated",
+    },
+  ];
+
+  // Display the driver's four most recent rides.
+  const recentRides = driverRideRecords.slice(0, 4).map((ride) => {
+    const pickup =
+      ride.pickup?.name ||
+      ride.pickup?.address ||
+      ride.pickupLocation?.address ||
+      ride.pickupAddress ||
+      "Pickup";
+
+    const dropoff =
+      ride.dropoff?.name ||
+      ride.dropoff?.address ||
+      ride.dropoffLocation?.address ||
+      ride.dropoffAddress ||
+      "Drop-off";
+
+    return {
+      id: ride.id,
+      main:
+        ride.passengerName ||
+        ride.passenger?.name ||
+        "Passenger",
+      sub: `${pickup} → ${dropoff}`,
+      side: `₦${getRideFare(ride).toLocaleString("en-NG")}`,
+    };
+  });
 
   async function handleSignOut() {
     if (signingOut) return;
@@ -192,13 +321,15 @@ export default function Dashboard({ role }) {
               <p className="text-sm font-semibold text-slate-900">
                 {firstName}
               </p>
+
               <p className="max-w-52 truncate text-xs text-slate-500">
                 {user?.email || ""}
               </p>
             </div>
 
             <span
-              className={`rounded-full px-3 py-1.5 text-xs font-bold ${ROLE_BADGES[role] || "bg-slate-100 text-slate-700"
+              className={`rounded-full px-3 py-1.5 text-xs font-bold ${ROLE_BADGES[role] ||
+                "bg-slate-100 text-slate-700"
                 }`}
             >
               {ROLE_LABEL[role] || "User"}
@@ -211,6 +342,7 @@ export default function Dashboard({ role }) {
               className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm font-semibold text-slate-700 transition hover:border-emerald-300 hover:bg-emerald-50 disabled:opacity-60"
             >
               <FiLogOut className="size-4" />
+
               <span className="hidden sm:inline">
                 {signingOut ? "Signing out..." : "Sign out"}
               </span>
@@ -234,11 +366,14 @@ export default function Dashboard({ role }) {
               <span className="flex size-8 items-center justify-center rounded-xl bg-emerald-100">
                 <FiActivity className="size-4" />
               </span>
+
               <span>{ROLE_LABEL[role] || "User"} workspace</span>
             </div>
 
             <h1 className="text-3xl font-bold tracking-tight text-slate-950 sm:text-4xl">
-              {role === "admin" ? "Welcome back." : `Hello, ${firstName}.`}
+              {role === "admin"
+                ? "Welcome back."
+                : `Hello, ${firstName}.`}
             </h1>
 
             <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-500 sm:text-base">
@@ -265,6 +400,7 @@ export default function Dashboard({ role }) {
               aria-hidden="true"
               className="pointer-events-none absolute -right-16 -top-20 size-64 rounded-full border-[35px] border-white/5"
             />
+
             <div
               aria-hidden="true"
               className="pointer-events-none absolute -bottom-28 right-32 size-56 rounded-full bg-emerald-700/70"
@@ -293,6 +429,7 @@ export default function Dashboard({ role }) {
                     ? "Your driving workspace"
                     : "Your passenger workspace"}
                 </span>
+
                 <FiArrowUpRight className="size-4" />
               </div>
             </div>
@@ -302,10 +439,18 @@ export default function Dashboard({ role }) {
         {role === "admin" ? (
           <AdminView currentEmail={user?.email} />
         ) : CONTENT[role] ? (
-          <ExampleView content={CONTENT[role]} role={role} />
+          <ExampleView
+            content={CONTENT[role]}
+            role={role}
+            stats={role === "driver" ? driverStats : undefined}
+            rides={role === "driver" ? recentRides : undefined}
+          />
         ) : (
           <section className="rounded-2xl border border-slate-200 bg-white p-6">
-            <h2 className="font-semibold">Dashboard unavailable</h2>
+            <h2 className="font-semibold">
+              Dashboard unavailable
+            </h2>
+
             <p className="mt-2 text-sm text-slate-500">
               This account does not have a recognised dashboard role.
             </p>
@@ -325,6 +470,7 @@ export default function Dashboard({ role }) {
               <h2 className="font-semibold text-slate-900">
                 Account information
               </h2>
+
               <p className="mt-1 text-sm text-slate-500">
                 Your signed-in account details.
               </p>
@@ -334,6 +480,7 @@ export default function Dashboard({ role }) {
                   <p className="text-xs font-medium text-slate-500">
                     Account name
                   </p>
+
                   <p className="mt-1 break-words text-sm font-semibold">
                     {profile?.displayName || firstName}
                   </p>
@@ -343,6 +490,7 @@ export default function Dashboard({ role }) {
                   <p className="text-xs font-medium text-slate-500">
                     Email address
                   </p>
+
                   <p className="mt-1 break-all text-sm font-semibold">
                     {user?.email || "—"}
                   </p>
@@ -353,15 +501,24 @@ export default function Dashboard({ role }) {
         </motion.section>
       </motion.main>
 
-      <StickyRoleButton role={role} alertCount={sosAlertCount} />
+      <StickyRoleButton
+        role={role}
+        alertCount={sosAlertCount}
+      />
     </PageTransition>
   );
 }
 
-function ExampleView({ content, role }) {
+function ExampleView({ content, role, rides, stats }) {
+  const displayedRides = rides ?? content.list;
+  const displayedStats = stats ?? content.stats;
+
   return (
     <>
-      <motion.p className="max-w-2xl text-base text-slate-600" variants={rise}>
+      <motion.p
+        className="max-w-2xl text-base text-slate-600"
+        variants={rise}
+      >
         {content.heading}
       </motion.p>
 
@@ -369,7 +526,7 @@ function ExampleView({ content, role }) {
         className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3"
         variants={group}
       >
-        {content.stats.map((stat, index) => (
+        {displayedStats.map((stat, index) => (
           <motion.div
             key={stat.label}
             variants={rise}
@@ -380,6 +537,7 @@ function ExampleView({ content, role }) {
                 <p className="text-sm font-medium text-slate-500">
                   {stat.label}
                 </p>
+
                 <p className="mt-3 break-words text-2xl font-bold tracking-tight text-slate-950 sm:text-3xl">
                   {stat.value}
                 </p>
@@ -387,10 +545,10 @@ function ExampleView({ content, role }) {
 
               <span
                 className={`flex size-10 shrink-0 items-center justify-center rounded-xl text-lg font-bold ${index === 0
-                  ? "bg-emerald-50 text-emerald-700"
-                  : index === 1
-                    ? "bg-sky-50 text-sky-700"
-                    : "bg-violet-50 text-violet-700"
+                    ? "bg-emerald-50 text-emerald-700"
+                    : index === 1
+                      ? "bg-sky-50 text-sky-700"
+                      : "bg-violet-50 text-violet-700"
                   }`}
               >
                 {index === 0 ? "↗" : index === 1 ? "◷" : "★"}
@@ -409,6 +567,7 @@ function ExampleView({ content, role }) {
             <h2 className="text-lg font-bold text-slate-900">
               {content.listTitle}
             </h2>
+
             <p className="mt-1 text-sm text-slate-500">
               Your recent ride activity
             </p>
@@ -423,9 +582,9 @@ function ExampleView({ content, role }) {
           className="m-0 list-none divide-y divide-slate-100 px-5"
           variants={group}
         >
-          {content.list.map((item, index) => (
+          {displayedRides.map((item, index) => (
             <motion.li
-              key={`${item.main}-${item.sub}`}
+              key={item.id || `${item.main}-${item.sub}`}
               variants={rise}
               className="flex items-center gap-3 py-4"
             >
@@ -437,6 +596,7 @@ function ExampleView({ content, role }) {
                 <p className="break-words text-sm font-semibold text-slate-900">
                   {item.main}
                 </p>
+
                 <p className="mt-1 break-words text-xs leading-5 text-slate-500 sm:text-sm">
                   {item.sub}
                 </p>
@@ -446,6 +606,7 @@ function ExampleView({ content, role }) {
                 <p className="text-sm font-bold tabular-nums text-slate-900 sm:text-base">
                   {item.side}
                 </p>
+
                 <p className="mt-1 text-xs text-slate-500">
                   {role === "driver" ? "Fare" : "Trip"}
                 </p>
@@ -454,10 +615,19 @@ function ExampleView({ content, role }) {
           ))}
         </motion.ul>
 
+        {displayedRides.length === 0 && (
+          <p className="px-5 py-6 text-sm text-slate-500">
+            {role === "driver"
+              ? "No recent rides assigned to you yet."
+              : "No recent trips to show."}
+          </p>
+        )}
+
         <div className="border-t border-slate-100 bg-slate-50 px-5 py-3">
           <p className="text-xs text-slate-500">
-            Sample activity — connect this section to live ride records when
-            ready.
+            {role === "driver"
+              ? "Showing your latest ride activity from FareBid."
+              : "Your recent activity."}
           </p>
         </div>
       </motion.section>
@@ -504,7 +674,8 @@ function AdminView({ currentEmail }) {
       return;
     }
 
-    const displayName = account.displayName || account.email || "this user";
+    const displayName =
+      account.displayName || account.email || "this user";
 
     const confirmed = window.confirm(
       `Delete the database profile for "${displayName}"?\n\nThis removes their Firestore user profile only. It does not delete their Firebase Authentication account.`
@@ -523,7 +694,9 @@ function AdminView({ currentEmail }) {
         previous.filter((item) => item.uid !== account.uid)
       );
 
-      setSuccessMsg(`Removed the database profile for ${displayName}.`);
+      setSuccessMsg(
+        `Removed the database profile for ${displayName}.`
+      );
     } catch (err) {
       setError(friendlyError(err));
     } finally {
@@ -548,14 +721,20 @@ function AdminView({ currentEmail }) {
         Manage FareBid accounts and review the current user directory.
       </p>
 
-      <motion.div className="grid gap-4 sm:grid-cols-3" variants={group}>
+      <motion.div
+        className="grid gap-4 sm:grid-cols-3"
+        variants={group}
+      >
         {stats.map((stat) => (
           <motion.div
             key={stat.label}
             className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm"
             variants={rise}
           >
-            <p className="text-sm text-slate-500">{stat.label}</p>
+            <p className="text-sm text-slate-500">
+              {stat.label}
+            </p>
+
             <p className="mt-3 text-3xl font-bold tabular-nums text-slate-950">
               {loading ? "—" : stat.value}
             </p>
@@ -569,7 +748,10 @@ function AdminView({ currentEmail }) {
       >
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-5">
           <div>
-            <h2 className="text-lg font-bold">FareBid accounts</h2>
+            <h2 className="text-lg font-bold">
+              FareBid accounts
+            </h2>
+
             <p className="mt-1 text-sm text-slate-500">
               Registered users and their assigned roles
             </p>
@@ -650,6 +832,7 @@ function AdminView({ currentEmail }) {
                       className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-600 transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700 disabled:opacity-50"
                     >
                       <FiTrash2 className="size-3.5" />
+
                       {deletingUid === account.uid
                         ? "Removing..."
                         : "Remove profile"}
@@ -664,9 +847,10 @@ function AdminView({ currentEmail }) {
 
       <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
         <FiShield className="mt-0.5 size-4 shrink-0" />
+
         <p>
-          Removing a profile here deletes its Firestore document only. It does
-          not remove the user's Firebase Authentication account.
+          Removing a profile here deletes its Firestore document only. It
+          does not remove the user's Firebase Authentication account.
         </p>
       </div>
     </>

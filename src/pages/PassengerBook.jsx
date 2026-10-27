@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef } from "react";
+
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion, AnimatePresence } from "motion/react";
 import {
@@ -19,7 +20,6 @@ import GoogleMapComponent, {
   calculateDistanceKm,
   calculateFare,
 } from "../components/GoogleMapComponent.jsx";
-import CarMotionLayout from "../components/CarMotionLayout.jsx";
 import {
   FiMinus,
   FiPlus,
@@ -29,141 +29,130 @@ import {
   FiPhone,
   FiNavigation,
   FiArrowLeft,
-  FiZap,
+  FiMapPin,
+  FiClock,
+  FiArrowRight,
+  FiShield,
 } from "react-icons/fi";
 import { FaCarSide } from "react-icons/fa";
+
+const statusLabels = {
+  requested: "Finding drivers",
+  driving_to_pickup: "Driver heading to pickup",
+  in_progress: "Ride in progress",
+  completed: "Trip completed",
+  cancelled: "Ride cancelled",
+};
+
+const formatNaira = (amount) =>
+  `₦${Number(amount || 0).toLocaleString("en-NG")}`;
 
 export default function PassengerBook() {
   const { user, profile } = useAuth();
   const navigate = useNavigate();
 
-  // Location picking states
   const [pickup, setPickup] = useState(POPULAR_LANDMARKS[0]);
   const [dropoff, setDropoff] = useState(POPULAR_LANDMARKS[1]);
-  const [selectionMode, setSelectionMode] = useState("pickup"); // "pickup" | "dropoff"
+  const [selectionMode, setSelectionMode] = useState("pickup");
 
-  // Bidding & Fare state
-  const distanceKm = calculateDistanceKm(pickup?.lat, pickup?.lng, dropoff?.lat, dropoff?.lng);
+  const distanceKm = calculateDistanceKm(pickup, dropoff);
   const baseCalculatedFare = calculateFare(distanceKm);
+
   const [offeredFare, setOfferedFare] = useState(baseCalculatedFare);
-
-  // Recalculate fare when locations change (if user hasn't manually adjusted it far away)
-  useEffect(() => {
-    setOfferedFare(baseCalculatedFare);
-  }, [baseCalculatedFare]);
-
-  // Passenger details & Emergency contact
+  const [passengerPhone, setPassengerPhone] = useState(profile?.phone || "");
   const [emergencyContact, setEmergencyContact] = useState(
-    profile?.emergencyContact || "+1 (555) 911-0199"
+    profile?.emergencyContact || ""
   );
-  const [passengerPhone, setPassengerPhone] = useState(profile?.phone || "+1 (555) 234-5678");
 
-  // Ride lifecycle state
   const [activeRideId, setActiveRideId] = useState(null);
   const [rideData, setRideData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
-
-  // Animation & simulation progression
-  // Max drop-off time is 90 seconds (can be fast-forwarded for testing)
-  const [simSpeed, setSimSpeed] = useState(1); // 1x or 3x speed multiplier
-  const [carProgress, setCarProgress] = useState(0); // 0 to 1
-  const [ridePhase, setRidePhase] = useState("idle"); // "idle" | "driving_to_pickup" | "in_progress" | "completed"
-  const [elapsedSeconds, setElapsedSeconds] = useState(0);
-
-  // SOS & Rating modals
   const [sosActive, setSosActive] = useState(false);
+
   const [showRatingModal, setShowRatingModal] = useState(false);
   const [ratingStars, setRatingStars] = useState(5);
   const [ratingComment, setRatingComment] = useState("");
-  const [selectedTags, setSelectedTags] = useState(["Great Service", "Smooth Ride"]);
+  const [selectedTags, setSelectedTags] = useState([
+    "Smooth Route",
+    "Safe Driving",
+  ]);
 
-  // Listen to active ride updates in Firestore
+  useEffect(() => {
+    setOfferedFare(baseCalculatedFare);
+  }, [baseCalculatedFare]);
+
+  useEffect(() => {
+    if (profile?.phone) setPassengerPhone(profile.phone);
+    if (profile?.emergencyContact) {
+      setEmergencyContact(profile.emergencyContact);
+    }
+  }, [profile]);
+
+  // Listen to the real ride document in Firebase.
   useEffect(() => {
     if (!activeRideId) return;
 
-    const unsubscribe = onSnapshot(doc(db, "rides", activeRideId), (snapshot) => {
-      if (snapshot.exists()) {
+    const unsubscribe = onSnapshot(
+      doc(db, "rides", activeRideId),
+      (snapshot) => {
+        if (!snapshot.exists()) return;
+
         const data = snapshot.data();
         setRideData(data);
+        setSosActive(Boolean(data.emergencyAlert?.active));
 
-        // Synchronize phase with Firestore
-        if (data.status === "driving_to_pickup") {
-          setRidePhase("driving_to_pickup");
-        } else if (data.status === "in_progress") {
-          setRidePhase("in_progress");
-        } else if (data.status === "completed") {
-          setRidePhase("completed");
+        if (data.status === "completed" && !data.rating) {
           setShowRatingModal(true);
+        } else {
+          setShowRatingModal(false);
         }
-
-        if (data.emergencyAlert?.active) {
-          setSosActive(true);
-        }
+      },
+      (error) => {
+        console.error("Ride listener error:", error);
+        setErrorMsg("Unable to receive ride updates. Please check your connection.");
       }
-    });
+    );
 
     return () => unsubscribe();
   }, [activeRideId]);
 
-  // Car movement simulation timer along road routes (up to 90 seconds max)
-  const animationRef = useRef(null);
-  useEffect(() => {
-    if (ridePhase !== "driving_to_pickup" && ridePhase !== "in_progress") {
-      if (animationRef.current) clearInterval(animationRef.current);
+  const rideStatus = rideData?.status || "requested";
+  const isRideActive = Boolean(activeRideId);
+  const driverOffers = (rideData?.bids || []).filter(
+    (bid) => bid.bidder === "driver"
+  );
+
+  function handleLandmarkSelect(landmark, type) {
+    if (isRideActive) return;
+
+    if (type === "pickup") {
+      setPickup(landmark);
+      setSelectionMode("dropoff");
+    } else {
+      setDropoff(landmark);
+    }
+
+    setErrorMsg("");
+  }
+
+  function adjustFare(amount) {
+    setOfferedFare((previous) => Math.max(500, Math.round(previous + amount)));
+  }
+
+  async function handleBookRide() {
+    if (!pickup || !dropoff) {
+      setErrorMsg("Please choose your pickup and destination.");
       return;
     }
 
-    // Phase 1 (to pickup): ~30 seconds. Phase 2 (to dropoff): ~60 seconds (Total 90s max)
-    const phaseTargetDuration = ridePhase === "driving_to_pickup" ? 30 : 60;
-    const intervalMs = 150;
-    const stepIncrement = (intervalMs / 1000 / phaseTargetDuration) * simSpeed;
+    if (pickup.lat === dropoff.lat && pickup.lng === dropoff.lng) {
+      setErrorMsg("Choose a different destination from your pickup.");
+      return;
+    }
 
-    animationRef.current = setInterval(() => {
-      setCarProgress((prev) => {
-        const next = prev + stepIncrement;
-        if (next >= 1) {
-          if (ridePhase === "driving_to_pickup") {
-            // Arrived at pickup -> Transition to in_progress
-            if (activeRideId) {
-              updateDoc(doc(db, "rides", activeRideId), {
-                status: "in_progress",
-                pickedUpAt: serverTimestamp(),
-              }).catch(console.error);
-            }
-            setRidePhase("in_progress");
-            return 0;
-          } else if (ridePhase === "in_progress") {
-            // Arrived at destination -> Transition to completed
-            if (activeRideId) {
-              updateDoc(doc(db, "rides", activeRideId), {
-                status: "completed",
-                completedAt: serverTimestamp(),
-              }).catch(console.error);
-            }
-            setRidePhase("completed");
-            setShowRatingModal(true);
-            return 1;
-          }
-        }
-        return next;
-      });
-
-      setElapsedSeconds((s) => s + (intervalMs / 1000) * simSpeed);
-    }, intervalMs);
-
-    return () => clearInterval(animationRef.current);
-  }, [ridePhase, simSpeed, activeRideId]);
-
-  // Adjust fare helper
-  function adjustFare(amount) {
-    setOfferedFare((prev) => Math.max(4.0, Math.round((prev + amount) * 10) / 10));
-  }
-
-  // Book / Request Ride
-  async function handleBookRide() {
-    if (!pickup || !dropoff) {
-      setErrorMsg("Please choose both a pickup location and destination.");
+    if (!user) {
+      setErrorMsg("Please sign in before booking a ride.");
       return;
     }
 
@@ -171,10 +160,13 @@ export default function PassengerBook() {
     setErrorMsg("");
 
     try {
+      const passengerName =
+        profile?.displayName || user.email?.split("@")[0] || "Passenger";
+
       const newRide = {
         passengerId: user.uid,
-        passengerName: profile?.displayName || user.email.split("@")[0],
-        passengerEmail: user.email,
+        passengerName,
+        passengerEmail: user.email || "",
         passengerPhone,
         emergencyContact,
         pickup: {
@@ -193,12 +185,12 @@ export default function PassengerBook() {
         suggestedFare: baseCalculatedFare,
         offeredFare,
         finalFare: offeredFare,
-        status: "requested", // requested -> accepted -> driving_to_pickup -> in_progress -> completed
+        status: "requested",
         bids: [
           {
             bidder: "passenger",
             userId: user.uid,
-            name: profile?.displayName || "Passenger",
+            name: passengerName,
             amount: offeredFare,
             timestamp: new Date().toISOString(),
           },
@@ -208,51 +200,67 @@ export default function PassengerBook() {
       };
 
       const docRef = await addDoc(collection(db, "rides"), newRide);
-      setActiveRideId(docRef.id);
+
       setRideData({ ...newRide, id: docRef.id });
-    } catch (err) {
-      console.error("Booking error:", err);
-      setErrorMsg("Failed to book ride: " + (err.message || "Please check connection."));
+      setActiveRideId(docRef.id);
+    } catch (error) {
+      console.error("Booking error:", error);
+      setErrorMsg("Your ride could not be booked. Please try again.");
     } finally {
       setLoading(false);
     }
   }
 
-  // Accept a driver's counter-offer
   async function handleAcceptCounterOffer(bid) {
-    if (!activeRideId) return;
+    if (!activeRideId || !bid.driverId) {
+      setErrorMsg("This offer is missing the driver's information.");
+      return;
+    }
+
+    setLoading(true);
+    setErrorMsg("");
+
     try {
       await updateDoc(doc(db, "rides", activeRideId), {
         status: "driving_to_pickup",
         finalFare: bid.amount,
         driverId: bid.driverId,
-        driverName: bid.driverName,
-        driverVehicle: bid.driverVehicle || "Toyota Camry · Silver · ABC-1234",
+        driverName: bid.driverName || "Your driver",
+        driverVehicle: bid.driverVehicle || "",
         acceptedAt: serverTimestamp(),
       });
-      setRidePhase("driving_to_pickup");
-      setCarProgress(0);
-    } catch (err) {
-      console.error("Error accepting counter-offer:", err);
+    } catch (error) {
+      console.error("Error accepting offer:", error);
+      setErrorMsg("Could not accept this offer. Please try again.");
+    } finally {
+      setLoading(false);
     }
   }
 
-  // Trigger SOS Emergency
   async function handleTriggerSOS() {
     if (!activeRideId) return;
-    setSosActive(true);
 
-    const liveCoords = {
-      lat: pickup.lat + ((dropoff.lat - pickup.lat) * carProgress || 0),
-      lng: pickup.lng + ((dropoff.lng - pickup.lng) * carProgress || 0),
-    };
+    setLoading(true);
+    setErrorMsg("");
 
-    const mapLink = `https://www.google.com/maps?q=${liveCoords.lat.toFixed(5)},${liveCoords.lng.toFixed(5)}`;
+    // Use actual driver GPS coordinates if the driver app writes them.
+    // Otherwise, use the pickup location rather than inventing movement.
+    const liveCoords = rideData?.driverLocation
+      ? {
+        lat: rideData.driverLocation.lat,
+        lng: rideData.driverLocation.lng,
+      }
+      : {
+        lat: pickup.lat,
+        lng: pickup.lng,
+      };
+
+    const mapLink = `https://www.google.com/maps?q=${liveCoords.lat},${liveCoords.lng}`;
+
     const smsMessage = encodeURIComponent(
-      `FAREBID EMERGENCY ALERT! Passenger ${user?.email} triggered SOS. Current location: ${mapLink}`
+      `FAREBID EMERGENCY ALERT! Passenger ${user?.email || ""} needs assistance. Location: ${mapLink}`
     );
 
-    // Update Firestore to notify Admin instantly
     try {
       await updateDoc(doc(db, "rides", activeRideId), {
         emergencyAlert: {
@@ -261,26 +269,33 @@ export default function PassengerBook() {
           lng: liveCoords.lng,
           mapLink,
           triggeredAt: new Date().toISOString(),
-          passengerName: profile?.displayName || user.email,
+          passengerName:
+            profile?.displayName || user?.email || "Passenger",
           passengerPhone,
           emergencyContact,
           driverName: rideData?.driverName || "Assigned Driver",
-          vehicle: rideData?.driverVehicle || "Toyota Camry",
+          vehicle: rideData?.driverVehicle || "",
         },
       });
-    } catch (err) {
-      console.error("SOS update error:", err);
-    }
 
-    // Open SMS URL protocol for instant dispatch to emergency contact
-    const smsUrl = `sms:${emergencyContact}?body=${smsMessage}`;
-    window.open(smsUrl, "_blank");
+      setSosActive(true);
+
+      if (emergencyContact.trim()) {
+        window.location.href = `sms:${emergencyContact}?body=${smsMessage}`;
+      }
+    } catch (error) {
+      console.error("SOS update error:", error);
+      setErrorMsg("The SOS alert could not be saved. Please try again.");
+    } finally {
+      setLoading(false);
+    }
   }
 
-  // Submit Driver Rating
   async function handleSubmitRating() {
-    if (!activeRideId) return;
+    if (!activeRideId || !user) return;
+
     setLoading(true);
+    setErrorMsg("");
 
     try {
       const ratingPayload = {
@@ -289,590 +304,825 @@ export default function PassengerBook() {
         tags: selectedTags,
         createdAt: serverTimestamp(),
         passengerId: user.uid,
-        passengerName: profile?.displayName || user.email.split("@")[0],
+        passengerName:
+          profile?.displayName || user.email?.split("@")[0] || "Passenger",
       };
 
       await updateDoc(doc(db, "rides", activeRideId), {
         rating: ratingPayload,
       });
 
-      // Update driver user document aggregate rating if driverId exists
       if (rideData?.driverId) {
         try {
           const driverRef = doc(db, "users", rideData.driverId);
           const driverSnap = await getDoc(driverRef);
+
           if (driverSnap.exists()) {
-            const dData = driverSnap.data();
-            const currentTotal = (dData.ratingAverage || 4.8) * (dData.ratingCount || 10);
-            const newCount = (dData.ratingCount || 10) + 1;
-            const newAverage = Math.round(((currentTotal + ratingStars) / newCount) * 10) / 10;
-            const updatedDistance = (dData.totalDistanceKm || 0) + distanceKm;
+            const driverData = driverSnap.data();
+            const oldCount = driverData.ratingCount || 0;
+            const oldAverage = driverData.ratingAverage || 0;
+            const newCount = oldCount + 1;
+
+            const newAverage =
+              Math.round(
+                ((oldAverage * oldCount + ratingStars) / newCount) * 10
+              ) / 10;
 
             await updateDoc(driverRef, {
               ratingAverage: newAverage,
               ratingCount: newCount,
-              totalDistanceKm: updatedDistance,
-              completedRidesCount: (dData.completedRidesCount || 0) + 1,
+              totalDistanceKm:
+                (driverData.totalDistanceKm || 0) + distanceKm,
+              completedRidesCount:
+                (driverData.completedRidesCount || 0) + 1,
             });
           }
-        } catch (ratingErr) {
-          console.warn("Could not update driver aggregate:", ratingErr);
+        } catch (ratingError) {
+          console.warn("Could not update driver rating summary:", ratingError);
         }
       }
 
       setShowRatingModal(false);
       navigate("/passenger");
-    } catch (err) {
-      console.error("Rating error:", err);
+    } catch (error) {
+      console.error("Rating error:", error);
+      setErrorMsg("Your rating could not be submitted. Please try again.");
     } finally {
       setLoading(false);
     }
   }
 
-  // Quick Demo Simulator: simulates driver acceptance or counter-offer for testing
-  async function handleSimulateDriverAction(actionType) {
-    if (!activeRideId) return;
-
-    if (actionType === "accept") {
-      await updateDoc(doc(db, "rides", activeRideId), {
-        status: "driving_to_pickup",
-        driverId: "sim_driver_01",
-        driverName: "Marcus Sterling",
-        driverVehicle: "Tesla Model 3 · Pearl White · EV-8899",
-        finalFare: offeredFare,
-        acceptedAt: serverTimestamp(),
-      });
-      setRidePhase("driving_to_pickup");
-      setCarProgress(0);
-    } else if (actionType === "counter") {
-      const counterAmount = Math.round((offeredFare * 1.25) * 10) / 10;
-      const currentBids = rideData?.bids || [];
-      await updateDoc(doc(db, "rides", activeRideId), {
-        bids: [
-          ...currentBids,
-          {
-            bidder: "driver",
-            driverId: "sim_driver_01",
-            driverName: "Marcus Sterling (Rating: 4.95 ★)",
-            driverVehicle: "Tesla Model 3 · Pearl White · EV-8899",
-            amount: counterAmount,
-            message: "Can pickup in 3 mins. Clean car, bottled water & chargers included.",
-            timestamp: new Date().toISOString(),
-          },
-        ],
-      });
-    }
-  }
-
   return (
-    <PageTransition className="min-h-screen bg-slate-950 text-slate-100">
+    <PageTransition className="min-h-screen bg-slate-50 text-slate-950">
       {/* Header */}
-      <header className="sticky top-0 z-40 border-b border-white/10 bg-slate-950/80 backdrop-blur-xl">
-        <div className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between px-4 sm:px-8">
-          <div className="flex items-center gap-4">
+      <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur-xl">
+        <div className="mx-auto flex min-h-[68px] w-full max-w-7xl items-center justify-between gap-3 px-4 sm:px-8">
+          <div className="flex items-center gap-3">
             <button
+              type="button"
               onClick={() => navigate("/passenger")}
-              className="flex items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-semibold text-slate-300 transition hover:bg-white/10 hover:text-white"
+              aria-label="Back to dashboard"
+              className="flex size-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-700 transition hover:bg-slate-100"
             >
-              <FiArrowLeft className="size-4" />
-              <span>Dashboard</span>
+              <FiArrowLeft className="size-5" />
             </button>
             <Logo to="/passenger" />
           </div>
 
-          <div className="flex items-center gap-3">
-            <span className="flex items-center gap-2 rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-400">
-              <span className="size-2 rounded-full bg-emerald-400 animate-pulse" />
-              Fare-Bid Passenger Portal
-            </span>
+          <div className="hidden items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800 sm:flex">
+            <span className="size-2 rounded-full bg-emerald-500" />
+            Passenger
           </div>
         </div>
       </header>
 
-      <main className="mx-auto w-full max-w-6xl px-4 py-6 sm:px-8">
-        {/* Active Emergency Notice Banner */}
-        {sosActive && (
-          <motion.div
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rose-500/40 bg-rose-950/40 p-4 text-rose-200 shadow-xl backdrop-blur-md"
-          >
-            <div className="flex items-center gap-3">
-              <span className="flex size-10 items-center justify-center rounded-xl bg-rose-600 text-white animate-pulse">
-                <FiAlertOctagon className="size-6" />
-              </span>
-              <div>
-                <p className="font-bold text-white">EMERGENCY SOS ALERT ACTIVATED</p>
-                <p className="text-xs text-rose-300">
-                  Live GPS beacon broadcasting to emergency contact ({emergencyContact}) & FareBid Admin Ops Hub.
-                </p>
-              </div>
-            </div>
-            <a
-              href={`tel:911`}
-              className="flex items-center gap-2 rounded-xl bg-rose-600 px-4 py-2 text-sm font-bold text-white shadow-lg shadow-rose-600/30 hover:bg-rose-500"
-            >
-              <FiPhone className="size-4" />
-              <span>Call Emergency Dispatch (911)</span>
-            </a>
-          </motion.div>
-        )}
+      <main className="mx-auto w-full max-w-7xl px-4 py-6 sm:px-8 sm:py-9">
+        {/* Heading */}
+        <div className="mb-7 flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-[0.18em] text-emerald-800">
+              Your journey, your price
+            </p>
+            <h1 className="mt-2 text-3xl font-black tracking-tight sm:text-4xl">
+              Where are you going?
+            </h1>
+            <p className="mt-2 max-w-xl text-sm leading-6 text-slate-600">
+              Choose your route, offer your fare, and compare offers from
+              drivers before agreeing on a price.
+            </p>
+          </div>
 
-        <div className="grid gap-6 lg:grid-cols-12">
-          {/* Left Column: Interactive Map & Live Movement */}
-          <div className="lg:col-span-7 flex flex-col gap-4">
-            <div className="rounded-3xl border border-white/10 bg-slate-900/60 p-4 shadow-xl backdrop-blur-xl">
-              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <FiNavigation className="size-5 text-emerald-400" />
-                  <h2 className="font-bold text-white">Route & Real-Time Navigation</h2>
+          <div className="flex items-center gap-2 self-start rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-600 sm:self-auto">
+            <FiShield className="size-4 text-emerald-700" />
+            Ride safety tools included
+          </div>
+        </div>
+
+        {/* SOS notice */}
+        <AnimatePresence>
+          {sosActive && (
+            <motion.div
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-rose-200 bg-rose-50 p-4"
+            >
+              <div className="flex items-center gap-3">
+                <span className="flex size-10 items-center justify-center rounded-xl bg-rose-600 text-white">
+                  <FiAlertOctagon className="size-5" />
+                </span>
+                <div>
+                  <p className="font-bold text-rose-900">
+                    Emergency alert activated
+                  </p>
+                  <p className="mt-1 text-xs text-rose-700">
+                    Contact: {emergencyContact || "No emergency contact added"}
+                  </p>
+                </div>
+              </div>
+
+              <a
+                href="tel:112"
+                className="rounded-xl bg-rose-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-rose-700"
+              >
+                Call emergency services
+              </a>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        <div className="grid items-start gap-6 lg:grid-cols-12">
+          {/* Map and route */}
+          <section className="min-w-0 space-y-5 lg:col-span-7">
+            <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-4 sm:p-5">
+                <div className="flex items-center gap-3">
+                  <span className="flex size-11 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-800">
+                    <FiNavigation className="size-5" />
+                  </span>
+                  <div>
+                    <h2 className="font-bold">Your route</h2>
+                    <p className="mt-1 text-xs text-slate-500">
+                      {isRideActive
+                        ? "Your selected pickup and destination"
+                        : "Choose locations on the map"}
+                    </p>
+                  </div>
                 </div>
 
-                {/* Location Selection Toggle Pills */}
-                {!activeRideId && (
-                  <div className="flex rounded-full border border-white/10 bg-slate-950/70 p-1 text-xs">
+                {!isRideActive && (
+                  <div className="flex gap-2">
                     <button
                       type="button"
                       onClick={() => setSelectionMode("pickup")}
-                      className={`flex items-center gap-1.5 rounded-full px-3 py-1 font-semibold transition ${selectionMode === "pickup"
-                        ? "bg-emerald-500 text-slate-950 shadow-md"
-                        : "text-slate-400 hover:text-white"
+                      className={`rounded-xl px-3 py-2 text-xs font-bold ${selectionMode === "pickup"
+                          ? "bg-emerald-800 text-white"
+                          : "border border-slate-200 bg-white text-slate-600"
                         }`}
                     >
-                      <span className="size-2 rounded-full bg-white" />
-                      Set Pickup (A)
+                      Pickup
                     </button>
                     <button
                       type="button"
                       onClick={() => setSelectionMode("dropoff")}
-                      className={`flex items-center gap-1.5 rounded-full px-3 py-1 font-semibold transition ${selectionMode === "dropoff"
-                        ? "bg-rose-500 text-white shadow-md"
-                        : "text-slate-400 hover:text-white"
+                      className={`rounded-xl px-3 py-2 text-xs font-bold ${selectionMode === "dropoff"
+                          ? "bg-emerald-800 text-white"
+                          : "border border-slate-200 bg-white text-slate-600"
                         }`}
                     >
-                      <span className="size-2 rounded-full bg-white" />
-                      Set Destination (B)
-                    </button>
-                  </div>
-                )}
-
-                {/* Simulation Speed & Max Time indicator */}
-                {activeRideId && (
-                  <div className="flex items-center gap-2 text-xs">
-                    <span className="text-slate-400">Max drop-off time: 90s</span>
-                    <button
-                      onClick={() => setSimSpeed((s) => (s === 1 ? 3 : 1))}
-                      className="rounded-lg border border-white/10 bg-white/5 px-2 py-1 font-bold text-amber-300 hover:bg-white/10"
-                    >
-                      {simSpeed}x Speed
+                      Destination
                     </button>
                   </div>
                 )}
               </div>
 
-              {/* Map Canvas */}
-              <GoogleMapComponent
-                pickup={pickup}
-                dropoff={dropoff}
-                onSelectPickup={(pt) => {
-                  setPickup(pt);
-                  setSelectionMode("dropoff");
-                }}
-                onSelectDropoff={(pt) => setDropoff(pt)}
-                selectionMode={selectionMode}
-                carProgress={carProgress}
-                ridePhase={ridePhase}
-                interactive={!activeRideId}
-                height="460px"
-              />
-
-              {/* Landmark Presets for Fast Click Selection */}
-              {!activeRideId && (
-                <div className="mt-4">
-                  <p className="mb-2 text-xs font-semibold text-slate-400">
-                    Quick Landmark Presets (tap to set as {selectionMode}):
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {POPULAR_LANDMARKS.map((lm) => (
-                      <button
-                        key={lm.name}
-                        onClick={() => {
-                          if (selectionMode === "pickup") {
-                            setPickup(lm);
-                            setSelectionMode("dropoff");
-                          } else {
-                            setDropoff(lm);
-                          }
-                        }}
-                        className="rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-slate-300 transition hover:border-emerald-500/40 hover:bg-emerald-500/10 hover:text-white"
-                      >
-                        {lm.name}
-                      </button>
-                    ))}
-                  </div>
+              <div className="p-3 sm:p-4">
+                <div className="mb-3 flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-2.5 text-xs text-slate-600">
+                  <span className="size-2 shrink-0 rounded-full bg-emerald-600" />
+                  {isRideActive
+                    ? `Ride status: ${statusLabels[rideStatus] || rideStatus}`
+                    : `Select a ${selectionMode === "pickup" ? "pickup point" : "destination"} on the map or below.`}
                 </div>
-              )}
+
+                <GoogleMapComponent
+                  pickup={pickup}
+                  dropoff={dropoff}
+                  onSelectPickup={(location) => {
+                    setPickup(location);
+                    setSelectionMode("dropoff");
+                    setErrorMsg("");
+                  }}
+                  onSelectDropoff={(location) => {
+                    setDropoff(location);
+                    setErrorMsg("");
+                  }}
+                  selectionMode={selectionMode}
+                  interactive={!isRideActive}
+                  height="440px"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 border-t border-slate-100">
+                <div className="border-r border-slate-100 p-4 sm:p-5">
+                  <div className="flex items-center gap-2 text-xs font-semibold text-slate-500">
+                    <FiMapPin className="text-emerald-700" />
+                    Estimated distance
+                  </div>
+                  <p className="mt-2 text-xl font-black">
+                    {Number(distanceKm).toFixed(2)} km
+                  </p>
+                </div>
+                <div className="p-4 sm:p-5">
+                  <div className="flex items-center gap-2 text-xs font-semibold text-slate-500">
+                    <FiClock className="text-emerald-700" />
+                    Trip estimate
+                  </div>
+                  <p className="mt-2 text-xl font-black">
+                    {formatNaira(baseCalculatedFare)}
+                  </p>
+                </div>
+              </div>
             </div>
 
-            {/* In-Transit Road Line Motion in Car Cockpit Layout */}
-            {activeRideId && ridePhase !== "idle" && (
-              <CarMotionLayout
-                pickup={pickup}
-                dropoff={dropoff}
-                progress={carProgress}
-                phase={ridePhase}
-                speedKmH={48}
-                maxSeconds={90}
-                elapsedSeconds={elapsedSeconds}
-              />
+            {/* Suggested locations */}
+            {!isRideActive && (
+              <div className="space-y-5 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+                <div>
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <h2 className="font-bold">Pickup locations</h2>
+                      <p className="mt-1 text-xs text-slate-500">
+                        Select where your driver should meet you.
+                      </p>
+                    </div>
+                    <span className="rounded-lg bg-emerald-50 px-2.5 py-1.5 text-xs font-bold text-emerald-800">
+                      A · Pickup
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    {POPULAR_LANDMARKS.map((landmark) => {
+                      const selected =
+                        pickup?.name === landmark.name &&
+                        pickup?.lat === landmark.lat &&
+                        pickup?.lng === landmark.lng;
+
+                      return (
+                        <button
+                          key={`pickup-${landmark.name}-${landmark.lat}-${landmark.lng}`}
+                          type="button"
+                          onClick={() => handleLandmarkSelect(landmark, "pickup")}
+                          aria-pressed={selected}
+                          className={`rounded-xl border p-3 text-left transition ${selected
+                              ? "border-emerald-700 bg-emerald-50"
+                              : "border-slate-200 hover:border-emerald-400 hover:bg-slate-50"
+                            }`}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <span className="text-sm font-bold">
+                              {landmark.name}
+                            </span>
+                            {selected && (
+                              <FiCheckCircle className="size-4 shrink-0 text-emerald-700" />
+                            )}
+                          </div>
+                          <span className="mt-1 block text-xs leading-5 text-slate-500">
+                            {landmark.address}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="border-t border-slate-100 pt-5">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <h2 className="font-bold">Destinations</h2>
+                      <p className="mt-1 text-xs text-slate-500">
+                        Where would you like to go?
+                      </p>
+                    </div>
+                    <span className="rounded-lg bg-slate-100 px-2.5 py-1.5 text-xs font-bold text-slate-700">
+                      B · Destination
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    {POPULAR_LANDMARKS.map((landmark) => {
+                      const selected =
+                        dropoff?.name === landmark.name &&
+                        dropoff?.lat === landmark.lat &&
+                        dropoff?.lng === landmark.lng;
+
+                      return (
+                        <button
+                          key={`destination-${landmark.name}-${landmark.lat}-${landmark.lng}`}
+                          type="button"
+                          onClick={() => handleLandmarkSelect(landmark, "dropoff")}
+                          aria-pressed={selected}
+                          className={`rounded-xl border p-3 text-left transition ${selected
+                              ? "border-emerald-700 bg-emerald-50"
+                              : "border-slate-200 hover:border-emerald-400 hover:bg-slate-50"
+                            }`}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <span className="text-sm font-bold">
+                              {landmark.name}
+                            </span>
+                            {selected && (
+                              <FiCheckCircle className="size-4 shrink-0 text-emerald-700" />
+                            )}
+                          </div>
+                          <span className="mt-1 block text-xs leading-5 text-slate-500">
+                            {landmark.address}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
             )}
 
-            {/* In-Transit Live Control Center (During Active Ride) */}
-            {activeRideId && (
-              <div className="rounded-3xl border border-white/10 bg-slate-900/60 p-5 shadow-xl backdrop-blur-xl">
-                <div className="flex flex-wrap items-center justify-between gap-4">
+            {/* Active ride and safety */}
+            {isRideActive && (
+              <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6">
+                <div className="flex flex-wrap items-start justify-between gap-4">
                   <div className="flex items-center gap-3">
-                    <div className="flex size-12 items-center justify-center rounded-2xl bg-amber-400 text-slate-950 shadow-lg">
+                    <span className="flex size-12 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-800">
                       <FaCarSide className="size-6" />
-                    </div>
+                    </span>
                     <div>
-                      <p className="font-bold text-white">
-                        {rideData?.driverName || "Driver en route"}
+                      <p className="font-bold">
+                        {rideData?.driverName || "Waiting for driver"}
                       </p>
-                      <p className="text-xs text-slate-400">
-                        {rideData?.driverVehicle || "Toyota Camry · Silver · ABC-1234"}
+                      <p className="mt-1 text-xs text-slate-500">
+                        {rideData?.driverVehicle || "Driver details will appear here"}
                       </p>
                     </div>
                   </div>
 
                   <div className="text-right">
-                    <p className="text-xs text-slate-400">Agreed Fare</p>
-                    <p className="font-sans text-2xl font-extrabold text-emerald-400">
-                      ₦{(rideData?.finalFare || offeredFare).toFixed(2)}
+                    <p className="text-xs text-slate-500">Agreed fare</p>
+                    <p className="mt-1 text-2xl font-black text-emerald-800">
+                      {formatNaira(rideData?.finalFare ?? offeredFare)}
                     </p>
                   </div>
                 </div>
 
-                {/* Progress Bar towards Max 90s drop-off */}
-                <div className="mt-4">
-                  <div className="flex justify-between text-xs font-semibold text-slate-400 mb-1">
-                    <span>
-                      {ridePhase === "driving_to_pickup" && "Phase 1: Driver heading to pickup point"}
-                      {ridePhase === "in_progress" && "Phase 2: Driving to destination using roads"}
-                      {ridePhase === "completed" && "Destination Reached!"}
-                    </span>
-                    <span>{Math.round(carProgress * 100)}%</span>
-                  </div>
-                  <div className="h-2.5 w-full overflow-hidden rounded-full bg-slate-800">
-                    <div
-                      className="h-full bg-linear-to-r from-emerald-500 via-teal-400 to-amber-400 transition-all duration-300"
-                      style={{ width: `${Math.round(carProgress * 100)}%` }}
+                <div className="mt-5 rounded-2xl bg-slate-50 p-4">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`size-2.5 rounded-full ${rideStatus === "completed"
+                          ? "bg-emerald-600"
+                          : rideStatus === "cancelled"
+                            ? "bg-rose-500"
+                            : "animate-pulse bg-amber-500"
+                        }`}
                     />
+                    <p className="text-sm font-bold">
+                      {statusLabels[rideStatus] || rideStatus}
+                    </p>
                   </div>
+                  <p className="mt-2 text-xs leading-5 text-slate-500">
+                    Ride updates appear here when your driver updates the ride
+                    status.
+                  </p>
                 </div>
 
-                {/* Emergency SOS Button */}
-                <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-white/10 pt-4">
-                  <div className="text-xs text-slate-400">
-                    <p className="font-semibold text-white">Safety & Emergency Protection</p>
-                    <p>Alerts your emergency contact with live map coordinates.</p>
+                <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-5">
+                  <div>
+                    <p className="font-bold">Safety assistance</p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Send an emergency alert during your trip.
+                    </p>
                   </div>
 
-                  <motion.button
-                    whileHover={{ scale: 1.04 }}
-                    whileTap={{ scale: 0.95 }}
+                  <button
+                    type="button"
+                    disabled={loading || rideStatus === "completed"}
                     onClick={handleTriggerSOS}
-                    className="flex items-center gap-2 rounded-2xl bg-rose-600 px-5 py-3 text-sm font-extrabold text-white shadow-lg shadow-rose-600/30 transition hover:bg-rose-500 active:scale-95"
+                    className="flex items-center gap-2 rounded-xl bg-rose-600 px-4 py-3 text-sm font-bold text-white transition hover:bg-rose-700 disabled:opacity-50"
                   >
-                    <FiAlertOctagon className="size-5 animate-spin" />
-                    <span>TRIGGER SOS EMERGENCY</span>
-                  </motion.button>
+                    <FiAlertOctagon className="size-5" />
+                    Trigger SOS
+                  </button>
                 </div>
               </div>
             )}
-          </div>
+          </section>
 
-          {/* Right Column: Fare-Bid Negotiation & Controls */}
-          <div className="lg:col-span-5 flex flex-col gap-4">
-            {/* If no ride is active yet: Fare Calculator & Bidding Card */}
-            {!activeRideId ? (
-              <div className="rounded-3xl border border-white/10 bg-slate-900/60 p-6 shadow-xl backdrop-blur-xl">
-                <h3 className="mb-4 font-sans text-xl font-bold text-white">Ride Details & Fare Bid</h3>
-
-                {/* Selected Location Summary */}
-                <div className="space-y-3 rounded-2xl border border-white/10 bg-slate-950/60 p-4">
-                  <div className="flex items-start gap-3">
-                    <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-emerald-500/20 text-xs font-bold text-emerald-400">
-                      A
-                    </span>
-                    <div className="min-w-0">
-                      <p className="text-xs text-slate-400">Pickup Location</p>
-                      <p className="truncate font-semibold text-white">{pickup.name}</p>
-                    </div>
-                  </div>
-
-                  <div className="ml-3 h-4 border-l-2 border-dashed border-slate-700" />
-
-                  <div className="flex items-start gap-3">
-                    <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-rose-500/20 text-xs font-bold text-rose-400">
-                      B
-                    </span>
-                    <div className="min-w-0">
-                      <p className="text-xs text-slate-400">Destination</p>
-                      <p className="truncate font-semibold text-white">{dropoff.name}</p>
-                    </div>
-                  </div>
+          {/* Booking and fare negotiation */}
+          <aside className="min-w-0 lg:col-span-5">
+            {!isRideActive ? (
+              <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+                <div className="bg-emerald-950 p-5 text-white sm:p-6">
+                  <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-200">
+                    Fare negotiation
+                  </p>
+                  <h2 className="mt-2 text-2xl font-black">
+                    Make your offer
+                  </h2>
+                  <p className="mt-2 text-sm leading-6 text-emerald-100">
+                    You suggest a price. Drivers can respond with their offers.
+                  </p>
                 </div>
 
-                {/* Distance & Suggested Estimate */}
-                <div className="mt-4 grid grid-cols-2 gap-3">
-                  <div className="rounded-2xl border border-white/10 bg-white/5 p-3.5">
-                    <p className="text-xs text-slate-400">Estimated Distance</p>
-                    <p className="font-sans text-xl font-bold text-white">{distanceKm} km</p>
-                  </div>
-                  <div className="rounded-2xl border border-white/10 bg-white/5 p-3.5">
-                    <p className="text-xs text-slate-400">System Suggested</p>
-                    <p className="font-sans text-xl font-bold text-slate-300">
-                      ₦{baseCalculatedFare.toFixed(2)}
-                    </p>
-                  </div>
-                </div>
-
-                {/* Fare Bidding Mechanism (Passenger can increase or reduce price) */}
-                <div className="mt-6 rounded-2xl border border-emerald-500/30 bg-emerald-950/20 p-5">
-                  <div className="mb-2 flex items-center justify-between">
-                    <span className="text-xs font-bold uppercase tracking-wider text-emerald-400">
-                      Your Offer (Fare-Bid)
-                    </span>
-                    <span className="text-xs text-slate-400">Tap - / + to adjust</span>
-                  </div>
-
-                  <div className="flex items-center justify-between gap-3">
-                    <button
-                      type="button"
-                      onClick={() => adjustFare(-100)}
-                      className="flex size-12 items-center justify-center rounded-2xl border border-white/10 bg-white/10 text-white transition hover:bg-white/20 active:scale-95"
-                    >
-                      <FiMinus className="size-5" />
-                    </button>
-
-                    <div className="text-center">
-                      <span className="font-sans text-4xl font-extrabold text-white">
-                        ₦{offeredFare.toLocaleString("en-NG")}
+                <div className="space-y-5 p-5 sm:p-6">
+                  <div className="space-y-3 rounded-2xl border border-slate-200 p-4">
+                    <div className="flex items-start gap-3">
+                      <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-emerald-800 text-xs font-black text-white">
+                        A
                       </span>
-                      <p className="mt-0.5 text-[11px] text-emerald-300">
-                        {offeredFare < baseCalculatedFare
-                          ? `Saver Offer (${Math.round(((baseCalculatedFare - offeredFare) / baseCalculatedFare) * 100)}% below suggested)`
-                          : offeredFare > baseCalculatedFare
-                            ? `Priority Offer (${Math.round(((offeredFare - baseCalculatedFare) / baseCalculatedFare) * 100)}% above suggested)`
-                            : "Standard Suggested Rate"}
+                      <div className="min-w-0">
+                        <p className="text-xs text-slate-500">Pickup</p>
+                        <p className="mt-1 break-words text-sm font-bold">
+                          {pickup?.name || "Select pickup"}
+                        </p>
+                        <p className="mt-1 text-xs leading-5 text-slate-500">
+                          {pickup?.address}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="ml-4 h-5 border-l-2 border-dashed border-slate-300" />
+
+                    <div className="flex items-start gap-3">
+                      <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-xs font-black text-emerald-800">
+                        B
+                      </span>
+                      <div className="min-w-0">
+                        <p className="text-xs text-slate-500">Destination</p>
+                        <p className="mt-1 break-words text-sm font-bold">
+                          {dropoff?.name || "Select destination"}
+                        </p>
+                        <p className="mt-1 text-xs leading-5 text-slate-500">
+                          {dropoff?.address}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between rounded-2xl bg-slate-50 p-4">
+                    <div>
+                      <p className="text-xs text-slate-500">Distance</p>
+                      <p className="mt-1 font-extrabold">
+                        {Number(distanceKm).toFixed(2)} km
+                      </p>
+                    </div>
+                    <div className="h-9 border-l border-slate-200" />
+                    <div>
+                      <p className="text-xs text-slate-500">Suggested fare</p>
+                      <p className="mt-1 font-extrabold text-emerald-800">
+                        {formatNaira(baseCalculatedFare)}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="rounded-2xl border border-emerald-100 bg-emerald-50/70 p-4 sm:p-5">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-bold">Your proposed fare</p>
+                      <span className="rounded-lg bg-white px-2 py-1 text-xs font-semibold text-slate-500">
+                        NGN
+                      </span>
+                    </div>
+
+                    <div className="mt-4 flex items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        aria-label="Decrease fare by 100 naira"
+                        onClick={() => adjustFare(-100)}
+                        className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white transition hover:bg-slate-100"
+                      >
+                        <FiMinus className="size-5" />
+                      </button>
+
+                      <div className="min-w-0 text-center">
+                        <p className="break-words text-3xl font-black tracking-tight sm:text-4xl">
+                          {formatNaira(offeredFare)}
+                        </p>
+                        <p className="mt-1 text-xs font-semibold text-emerald-800">
+                          {offeredFare < baseCalculatedFare
+                            ? "Below suggested fare"
+                            : offeredFare > baseCalculatedFare
+                              ? "Above suggested fare"
+                              : "Suggested price"}
+                        </p>
+                      </div>
+
+                      <button
+                        type="button"
+                        aria-label="Increase fare by 100 naira"
+                        onClick={() => adjustFare(100)}
+                        className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white transition hover:bg-slate-100"
+                      >
+                        <FiPlus className="size-5" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="passenger-phone"
+                      className="mb-2 block text-sm font-semibold"
+                    >
+                      Phone number
+                    </label>
+                    <input
+                      id="passenger-phone"
+                      type="tel"
+                      value={passengerPhone}
+                      onChange={(event) => setPassengerPhone(event.target.value)}
+                      placeholder="Enter your phone number"
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-sm outline-none transition focus:border-emerald-700 focus:ring-2 focus:ring-emerald-100"
+                    />
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="emergency-contact"
+                      className="mb-2 block text-sm font-semibold"
+                    >
+                      Emergency contact
+                    </label>
+                    <input
+                      id="emergency-contact"
+                      type="tel"
+                      value={emergencyContact}
+                      onChange={(event) => setEmergencyContact(event.target.value)}
+                      placeholder="Emergency contact number"
+                      className="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-3 text-sm outline-none transition focus:border-emerald-700 focus:ring-2 focus:ring-emerald-100"
+                    />
+                  </div>
+
+                  {errorMsg && (
+                    <p
+                      role="alert"
+                      className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700"
+                    >
+                      {errorMsg}
+                    </p>
+                  )}
+
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={handleBookRide}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-800 px-4 py-4 text-sm font-extrabold text-white transition hover:bg-emerald-900 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    {loading ? "Submitting request..." : "Find a driver"}
+                    {!loading && <FiArrowRight className="size-5" />}
+                  </button>
+
+                  <p className="text-center text-xs leading-5 text-slate-500">
+                    No driver is assigned until a valid driver offer is accepted.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+                <div className="border-b border-slate-100 p-5 sm:p-6">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-800">
+                        FareBid
+                      </p>
+                      <h2 className="mt-2 text-2xl font-black">
+                        Driver offers
+                      </h2>
+                      <p className="mt-1 text-xs text-slate-500">
+                        Request ID: {activeRideId.slice(0, 8)}
                       </p>
                     </div>
 
-                    <button
-                      type="button"
-                      onClick={() => adjustFare(100)}
-                      className="flex size-12 items-center justify-center rounded-2xl border border-white/10 bg-white/10 text-white transition hover:bg-white/20 active:scale-95"
-                    >
-                      <FiPlus className="size-5" />
-                    </button>
+                    <span className="rounded-xl bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-800">
+                      {statusLabels[rideStatus] || rideStatus}
+                    </span>
                   </div>
                 </div>
 
-                {/* Emergency Contact field */}
-                <div className="mt-4">
-                  <label className="mb-1 block text-xs font-semibold text-slate-300">
-                    Emergency Contact Number (for SOS dispatch):
-                  </label>
-                  <input
-                    type="tel"
-                    value={emergencyContact}
-                    onChange={(e) => setEmergencyContact(e.target.value)}
-                    placeholder="+1 555-0199"
-                    className="w-full rounded-xl border border-white/10 bg-slate-950 px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:border-emerald-500 focus:outline-none"
-                  />
-                </div>
+                <div className="space-y-4 p-5 sm:p-6">
+                  <div className="rounded-2xl bg-slate-50 p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-semibold text-slate-600">
+                        Your offer
+                      </p>
+                      <p className="text-lg font-black">
+                        {formatNaira(rideData?.offeredFare ?? offeredFare)}
+                      </p>
+                    </div>
+                    <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
+                      <FiMapPin className="shrink-0 text-emerald-700" />
+                      <span className="min-w-0 break-words">
+                        {rideData?.pickup?.name || pickup.name}
+                      </span>
+                      <FiArrowRight className="shrink-0" />
+                      <span className="min-w-0 break-words">
+                        {rideData?.dropoff?.name || dropoff.name}
+                      </span>
+                    </div>
+                  </div>
 
-                {errorMsg && (
-                  <p className="mt-3 rounded-xl bg-rose-950/60 p-3 text-xs text-rose-300 border border-rose-500/30">
-                    {errorMsg}
-                  </p>
-                )}
-
-                {/* Book Ride Button */}
-                <motion.button
-                  whileHover={{ scale: 1.02 }}
-                  whileTap={{ scale: 0.98 }}
-                  disabled={loading}
-                  onClick={handleBookRide}
-                  className="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl bg-linear-to-r from-emerald-500 to-teal-500 py-4 text-base font-bold text-slate-950 shadow-xl shadow-emerald-500/25 transition hover:shadow-2xl hover:shadow-emerald-500/40 disabled:opacity-50"
-                >
-                  <FiZap className="size-5" />
-                  <span>{loading ? "Broadcasting Ride..." : "Book Ride · Offer ₦" + offeredFare.toFixed(2)}</span>
-                </motion.button>
-              </div>
-            ) : (
-              /* If ride is active: Real-Time Bidding & Driver Responses Feed */
-              <div className="rounded-3xl border border-white/10 bg-slate-900/60 p-6 shadow-xl backdrop-blur-xl">
-                <div className="flex items-center justify-between border-b border-white/10 pb-4">
                   <div>
-                    <h3 className="font-sans text-xl font-bold text-white">Live Bidding & Driver Offers</h3>
-                    <p className="text-xs text-slate-400">Ride ID: #{activeRideId.slice(0, 8)}</p>
-                  </div>
-                  <span className="rounded-full bg-emerald-500/20 px-3 py-1 text-xs font-bold text-emerald-400">
-                    {rideData?.status?.toUpperCase() || "SEARCHING"}
-                  </span>
-                </div>
+                    <div className="mb-3 flex items-center justify-between gap-2">
+                      <h3 className="text-sm font-bold">Offers from drivers</h3>
+                      <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600">
+                        {driverOffers.length}
+                      </span>
+                    </div>
 
-                {/* Bids List / Counter Offers */}
-                <div className="mt-4 space-y-3">
-                  <p className="text-xs font-semibold text-slate-400">Negotiation History:</p>
-
-                  {rideData?.bids?.map((bid, i) => (
-                    <div
-                      key={i}
-                      className={`rounded-2xl border p-4 ${bid.bidder === "driver"
-                        ? "border-amber-500/30 bg-amber-950/20"
-                        : "border-white/10 bg-slate-950/50"
-                        }`}
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold text-white">
-                          {bid.bidder === "driver" ? "🚗 " + bid.driverName : "🙋 You (Passenger)"}
+                    {driverOffers.length === 0 ? (
+                      <div className="rounded-2xl border border-dashed border-slate-300 p-6 text-center">
+                        <span className="mx-auto flex size-12 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-800">
+                          <FaCarSide className="size-6" />
                         </span>
-                        <span className="font-sans text-lg font-extrabold text-emerald-400">
-                          ₦{bid.amount?.toLocaleString("en-NG")}
-                        </span>
+                        <p className="mt-3 font-bold">
+                          Waiting for driver offers
+                        </p>
+                        <p className="mx-auto mt-2 max-w-xs text-xs leading-5 text-slate-500">
+                          Your request is saved. Driver offers will appear here
+                          when drivers submit them through the app.
+                        </p>
                       </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {driverOffers.map((bid, index) => {
+                          const canAccept =
+                            rideStatus === "requested" &&
+                            Boolean(bid.driverId) &&
+                            !loading;
 
-                      {bid.message && <p className="mt-1 text-xs text-slate-300">{bid.message}</p>}
+                          return (
+                            <div
+                              key={`${bid.driverId || bid.timestamp || index}-${index}`}
+                              className="rounded-2xl border border-slate-200 p-4 transition hover:border-emerald-300"
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="flex min-w-0 items-center gap-3">
+                                  <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-700">
+                                    <FaCarSide className="size-5" />
+                                  </span>
+                                  <div className="min-w-0">
+                                    <p className="break-words font-bold">
+                                      {bid.driverName || "FareBid driver"}
+                                    </p>
+                                    <p className="mt-1 text-xs leading-5 text-slate-500">
+                                      {bid.driverVehicle || "Vehicle details pending"}
+                                    </p>
+                                  </div>
+                                </div>
 
-                      {bid.bidder === "driver" && rideData?.status === "requested" && (
-                        <button
-                          type="button"
-                          onClick={() => handleAcceptCounterOffer(bid)}
-                          className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-xl bg-emerald-500 py-2 text-xs font-bold text-slate-950 hover:bg-emerald-400"
-                        >
-                          <FiCheckCircle className="size-4" />
-                          <span>Accept Counter-Offer (₦{bid.amount?.toLocaleString("en-NG")})</span>
-                        </button>
-                      )}
-                    </div>
-                  ))}
-                </div>
+                                <div className="shrink-0 text-right">
+                                  <p className="text-lg font-black text-emerald-800">
+                                    {formatNaira(bid.amount)}
+                                  </p>
+                                  <p className="text-[11px] text-slate-500">
+                                    Driver offer
+                                  </p>
+                                </div>
+                              </div>
 
-                {/* Fast Simulator Controls for Instant Demo Testing */}
-                {rideData?.status === "requested" && (
-                  <div className="mt-6 rounded-2xl border border-white/10 bg-slate-950/70 p-4">
-                    <p className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">
-                      Testing Tools (Live Simulated Driver):
-                    </p>
-                    <div className="grid grid-cols-2 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleSimulateDriverAction("accept")}
-                        className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 py-2 text-xs font-semibold text-emerald-300 hover:bg-emerald-500/20"
-                      >
-                        Simulate Driver Accept
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleSimulateDriverAction("counter")}
-                        className="rounded-xl border border-amber-500/30 bg-amber-500/10 py-2 text-xs font-semibold text-amber-300 hover:bg-amber-500/20"
-                      >
-                        Simulate Counter-Offer
-                      </button>
-                    </div>
+                              {bid.message && (
+                                <p className="mt-3 rounded-xl bg-slate-50 p-3 text-xs leading-5 text-slate-600">
+                                  {bid.message}
+                                </p>
+                              )}
+
+                              {rideStatus === "requested" && (
+                                <button
+                                  type="button"
+                                  disabled={!canAccept}
+                                  onClick={() => handleAcceptCounterOffer(bid)}
+                                  className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-800 px-3 py-3 text-sm font-bold text-white transition hover:bg-emerald-900 disabled:cursor-not-allowed disabled:opacity-50"
+                                >
+                                  <FiCheckCircle className="size-4" />
+                                  {!bid.driverId
+                                    ? "Driver details unavailable"
+                                    : "Accept this offer"}
+                                </button>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
-                )}
+
+                  {errorMsg && (
+                    <p
+                      role="alert"
+                      className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700"
+                    >
+                      {errorMsg}
+                    </p>
+                  )}
+
+                  {rideStatus === "completed" && rideData?.rating && (
+                    <div className="rounded-xl bg-emerald-50 p-4 text-sm font-semibold text-emerald-800">
+                      Your trip is complete. Thank you for riding with FareBid.
+                    </div>
+                  )}
+                </div>
               </div>
             )}
-          </div>
+          </aside>
         </div>
       </main>
 
-      {/* Driver Rating Modal (pops up when ride is completed) */}
+      {/* Driver rating modal */}
       <AnimatePresence>
         {showRatingModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-md">
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/70 p-4 backdrop-blur-sm"
+          >
             <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              className="w-full max-w-md rounded-3xl border border-white/15 bg-slate-900 p-6 shadow-2xl"
+              initial={{ scale: 0.96, opacity: 0, y: 12 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.96, opacity: 0, y: 12 }}
+              className="my-auto w-full max-w-md rounded-3xl bg-white p-6 shadow-2xl"
             >
               <div className="text-center">
-                <span className="flex size-14 mx-auto items-center justify-center rounded-2xl bg-amber-400/20 text-amber-400 mb-3">
-                  <FiStar className="size-8 fill-amber-400" />
+                <span className="mx-auto flex size-14 items-center justify-center rounded-2xl bg-emerald-50 text-emerald-800">
+                  <FiStar className="size-7 fill-emerald-200" />
                 </span>
-                <h3 className="font-sans text-2xl font-bold text-white">Rate Your Driver</h3>
-                <p className="mt-1 text-xs text-slate-400">
-                  How was your ride with {rideData?.driverName || "Marcus"}?
+                <p className="mt-4 text-xs font-bold uppercase tracking-[0.16em] text-emerald-800">
+                  Trip completed
+                </p>
+                <h2 className="mt-2 text-2xl font-black">Rate your driver</h2>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  How was your ride with {rideData?.driverName || "your driver"}?
                 </p>
               </div>
 
-              {/* Star Selector */}
               <div className="my-5 flex justify-center gap-2">
                 {[1, 2, 3, 4, 5].map((star) => (
                   <button
                     key={star}
                     type="button"
+                    aria-label={`Rate ${star} star${star === 1 ? "" : "s"}`}
+                    aria-pressed={ratingStars === star}
                     onClick={() => setRatingStars(star)}
-                    className="p-1 transition-transform hover:scale-125"
+                    className="rounded-lg p-1 transition hover:scale-110"
                   >
                     <FiStar
-                      className={`size-8 ${star <= ratingStars ? "text-amber-400 fill-amber-400" : "text-slate-600"
+                      className={`size-8 ${star <= ratingStars
+                          ? "fill-amber-400 text-amber-500"
+                          : "text-slate-300"
                         }`}
                     />
                   </button>
                 ))}
               </div>
 
-              {/* Quality Tags */}
-              <div className="mb-4 flex flex-wrap justify-center gap-1.5">
-                {["Clean Vehicle", "Smooth Route", "Polite & Helpful", "On Time", "Safe Driving"].map(
-                  (tag) => {
-                    const isSelected = selectedTags.includes(tag);
-                    return (
-                      <button
-                        key={tag}
-                        type="button"
-                        onClick={() =>
-                          setSelectedTags((prev) =>
-                            isSelected ? prev.filter((t) => t !== tag) : [...prev, tag]
-                          )
-                        }
-                        className={`rounded-full px-3 py-1 text-xs font-semibold transition ${isSelected
-                          ? "bg-amber-400 text-slate-950 font-bold"
-                          : "border border-white/10 bg-white/5 text-slate-400 hover:text-white"
-                          }`}
-                      >
-                        {tag}
-                      </button>
-                    );
-                  }
-                )}
+              <div className="mb-4 flex flex-wrap justify-center gap-2">
+                {[
+                  "Clean Vehicle",
+                  "Smooth Route",
+                  "Polite & Helpful",
+                  "On Time",
+                  "Safe Driving",
+                ].map((tag) => {
+                  const isSelected = selectedTags.includes(tag);
+
+                  return (
+                    <button
+                      key={tag}
+                      type="button"
+                      aria-pressed={isSelected}
+                      onClick={() =>
+                        setSelectedTags((previous) =>
+                          isSelected
+                            ? previous.filter((item) => item !== tag)
+                            : [...previous, tag]
+                        )
+                      }
+                      className={`rounded-full px-3 py-2 text-xs font-semibold transition ${isSelected
+                          ? "bg-emerald-800 text-white"
+                          : "border border-slate-200 text-slate-600 hover:bg-slate-50"
+                        }`}
+                    >
+                      {tag}
+                    </button>
+                  );
+                })}
               </div>
 
-              {/* Comment text */}
+              <label
+                htmlFor="driver-review"
+                className="mb-2 block text-sm font-semibold"
+              >
+                Your review (optional)
+              </label>
               <textarea
+                id="driver-review"
                 value={ratingComment}
-                onChange={(e) => setRatingComment(e.target.value)}
-                placeholder="Leave a short review for the driver..."
+                onChange={(event) => setRatingComment(event.target.value)}
+                placeholder="Share your experience..."
                 rows={3}
-                className="w-full rounded-2xl border border-white/10 bg-slate-950 p-3 text-xs text-white placeholder-slate-500 focus:border-amber-400 focus:outline-none"
+                className="w-full resize-y rounded-xl border border-slate-200 p-3 text-sm outline-none transition focus:border-emerald-700 focus:ring-2 focus:ring-emerald-100"
               />
+
+              {errorMsg && (
+                <p role="alert" className="mt-3 text-sm text-rose-700">
+                  {errorMsg}
+                </p>
+              )}
 
               <button
                 type="button"
                 disabled={loading}
                 onClick={handleSubmitRating}
-                className="mt-4 flex w-full items-center justify-center gap-2 rounded-2xl bg-amber-400 py-3.5 text-sm font-bold text-slate-950 hover:bg-amber-300"
+                className="mt-4 flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-800 px-4 py-3.5 text-sm font-bold text-white transition hover:bg-emerald-900 disabled:opacity-50"
               >
-                <span>Submit Rating & Complete Trip</span>
+                <FiCheckCircle className="size-5" />
+                {loading ? "Submitting..." : "Submit rating"}
               </button>
             </motion.div>
-          </div>
+          </motion.div>
         )}
       </AnimatePresence>
     </PageTransition>

@@ -28,8 +28,8 @@ export default function CarMotionLayout({
             {phase === "driving_to_pickup"
               ? "Driver Heading to Pickup"
               : phase === "completed"
-              ? "Trip Completed"
-              : "Trip In Progress"}
+                ? "Trip Completed"
+                : "Trip In Progress"}
           </span>
           <span className="text-slate-500">·</span>
           <span className="text-slate-400">In-Car Telemetry</span>

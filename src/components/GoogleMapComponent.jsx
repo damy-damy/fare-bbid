@@ -40,10 +40,10 @@ export function calculateDistanceKm(lat1, lon1, lat2, lon2) {
 
 // Fare calculation formula: Base + Per Km
 export function calculateFare(distanceKm) {
-  const BASE_FARE = 6.00;
-  const PER_KM_RATE = 2.40;
+  const BASE_FARE = 1000;
+  const PER_KM_RATE = 300;
   const calculated = BASE_FARE + distanceKm * PER_KM_RATE;
-  return Math.round(calculated * 10) / 10;
+  return Math.round(calculated * 100) / 100;
 }
 
 export default function GoogleMapComponent({

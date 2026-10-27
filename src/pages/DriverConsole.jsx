@@ -20,7 +20,6 @@ import {
   FiPower,
   FiRadio,
   FiCheckCircle,
-  FiDollarSign,
   FiNavigation,
   FiAlertTriangle,
   FiPlus,
@@ -249,16 +248,14 @@ export default function DriverConsole() {
           <div className="flex items-center gap-3">
             {/* Status Pill */}
             <span
-              className={`flex items-center gap-2 rounded-full px-3 py-1 text-xs font-bold ${
-                isOnline
-                  ? "border border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
-                  : "border border-white/10 bg-white/5 text-slate-400"
-              }`}
+              className={`flex items-center gap-2 rounded-full px-3 py-1 text-xs font-bold ${isOnline
+                ? "border border-emerald-500/30 bg-emerald-500/10 text-emerald-400"
+                : "border border-white/10 bg-white/5 text-slate-400"
+                }`}
             >
               <span
-                className={`size-2 rounded-full ${
-                  isOnline ? "bg-emerald-400 animate-ping" : "bg-slate-500"
-                }`}
+                className={`size-2 rounded-full ${isOnline ? "bg-emerald-400 animate-ping" : "bg-slate-500"
+                  }`}
               />
               {isOnline ? "ACTIVE ON FARE-BID" : "OFFLINE"}
             </span>
@@ -297,11 +294,10 @@ export default function DriverConsole() {
                 whileTap={{ scale: 0.95 }}
                 disabled={loadingToggle || driverStatus === "banned"}
                 onClick={handleToggleOnline}
-                className={`flex items-center gap-2.5 rounded-2xl px-6 py-3.5 text-sm font-extrabold shadow-xl transition-all ${
-                  isOnline
-                    ? "bg-rose-600 text-white shadow-rose-600/30 hover:bg-rose-500"
-                    : "bg-linear-to-r from-emerald-500 to-teal-500 text-slate-950 shadow-emerald-500/25 hover:from-emerald-400 hover:to-teal-400"
-                }`}
+                className={`flex items-center gap-2.5 rounded-2xl px-6 py-3.5 text-sm font-extrabold shadow-xl transition-all ${isOnline
+                  ? "bg-rose-600 text-white shadow-rose-600/30 hover:bg-rose-500"
+                  : "bg-linear-to-r from-emerald-500 to-teal-500 text-slate-950 shadow-emerald-500/25 hover:from-emerald-400 hover:to-teal-400"
+                  }`}
               >
                 <FiPower className="size-5" />
                 <span>{isOnline ? "Go Offline" : "Be Online (Active)"}</span>
@@ -398,7 +394,7 @@ export default function DriverConsole() {
                   <div className="text-right">
                     <p className="text-xs text-slate-400">Locked Fare</p>
                     <p className="font-sans text-3xl font-extrabold text-emerald-400">
-                      ${activeRide.finalFare?.toFixed(2)}
+                      ₦{activeRide.finalFare?.toLocaleString("en-NG")}
                     </p>
                   </div>
                 </div>
@@ -497,7 +493,7 @@ export default function DriverConsole() {
                         <div className="text-right">
                           <p className="text-xs text-slate-400">Offered Fare</p>
                           <span className="font-sans text-2xl font-extrabold text-emerald-400">
-                            ${ride.offeredFare?.toFixed(2)}
+                            ₦{ride.offeredFare?.toLocaleString("en-NG")}
                           </span>
                         </div>
                       </div>
@@ -522,7 +518,7 @@ export default function DriverConsole() {
                           className="flex items-center justify-center gap-1.5 rounded-xl bg-emerald-500 py-2.5 text-xs font-bold text-slate-950 hover:bg-emerald-400"
                         >
                           <FiCheckCircle className="size-4" />
-                          <span>Accept ${ride.offeredFare?.toFixed(2)}</span>
+                          <span>Accept ₦{ride.offeredFare?.toLocaleString("en-NG")}</span>
                         </button>
 
                         <button
@@ -533,7 +529,7 @@ export default function DriverConsole() {
                           }}
                           className="flex items-center justify-center gap-1.5 rounded-xl border border-amber-500/40 bg-amber-500/10 py-2.5 text-xs font-bold text-amber-300 hover:bg-amber-500/20"
                         >
-                          <FiDollarSign className="size-4" />
+                          <span className="text-sm font-bold">₦</span>
                           <span>Counter-Offer</span>
                         </button>
                       </div>
@@ -566,7 +562,7 @@ export default function DriverConsole() {
                 <div className="flex items-center justify-between gap-3">
                   <button
                     type="button"
-                    onClick={() => setCounterAmount((a) => Math.max(5, Math.round((a - 1) * 10) / 10))}
+                    onClick={() => setCounterAmount((a) => Math.max(1000, a - 100))}
                     className="flex size-12 items-center justify-center rounded-2xl border border-white/10 bg-white/10 text-white hover:bg-white/20"
                   >
                     <FiMinus className="size-5" />
@@ -574,14 +570,14 @@ export default function DriverConsole() {
 
                   <div className="text-center">
                     <span className="font-sans text-4xl font-extrabold text-amber-400">
-                      ${counterAmount.toFixed(2)}
+                      ₦{counterAmount.toLocaleString("en-NG")}
                     </span>
                     <p className="text-[11px] text-slate-400">Proposed Fare</p>
                   </div>
 
                   <button
                     type="button"
-                    onClick={() => setCounterAmount((a) => Math.round((a + 1) * 10) / 10)}
+                    onClick={() => setCounterAmount((a) => a + 100)}
                     className="flex size-12 items-center justify-center rounded-2xl border border-white/10 bg-white/10 text-white hover:bg-white/20"
                   >
                     <FiPlus className="size-5" />

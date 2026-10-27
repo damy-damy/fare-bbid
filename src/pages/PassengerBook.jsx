@@ -435,8 +435,8 @@ export default function PassengerBook() {
                       type="button"
                       onClick={() => setSelectionMode("pickup")}
                       className={`flex items-center gap-1.5 rounded-full px-3 py-1 font-semibold transition ${selectionMode === "pickup"
-                          ? "bg-emerald-500 text-slate-950 shadow-md"
-                          : "text-slate-400 hover:text-white"
+                        ? "bg-emerald-500 text-slate-950 shadow-md"
+                        : "text-slate-400 hover:text-white"
                         }`}
                     >
                       <span className="size-2 rounded-full bg-white" />
@@ -446,8 +446,8 @@ export default function PassengerBook() {
                       type="button"
                       onClick={() => setSelectionMode("dropoff")}
                       className={`flex items-center gap-1.5 rounded-full px-3 py-1 font-semibold transition ${selectionMode === "dropoff"
-                          ? "bg-rose-500 text-white shadow-md"
-                          : "text-slate-400 hover:text-white"
+                        ? "bg-rose-500 text-white shadow-md"
+                        : "text-slate-400 hover:text-white"
                         }`}
                     >
                       <span className="size-2 rounded-full bg-white" />
@@ -548,7 +548,7 @@ export default function PassengerBook() {
                   <div className="text-right">
                     <p className="text-xs text-slate-400">Agreed Fare</p>
                     <p className="font-sans text-2xl font-extrabold text-emerald-400">
-                      ${(rideData?.finalFare || offeredFare).toFixed(2)}
+                      ₦{(rideData?.finalFare || offeredFare).toFixed(2)}
                     </p>
                   </div>
                 </div>
@@ -633,7 +633,7 @@ export default function PassengerBook() {
                   <div className="rounded-2xl border border-white/10 bg-white/5 p-3.5">
                     <p className="text-xs text-slate-400">System Suggested</p>
                     <p className="font-sans text-xl font-bold text-slate-300">
-                      ${baseCalculatedFare.toFixed(2)}
+                      ₦{baseCalculatedFare.toFixed(2)}
                     </p>
                   </div>
                 </div>
@@ -650,7 +650,7 @@ export default function PassengerBook() {
                   <div className="flex items-center justify-between gap-3">
                     <button
                       type="button"
-                      onClick={() => adjustFare(-1.0)}
+                      onClick={() => adjustFare(-100)}
                       className="flex size-12 items-center justify-center rounded-2xl border border-white/10 bg-white/10 text-white transition hover:bg-white/20 active:scale-95"
                     >
                       <FiMinus className="size-5" />
@@ -658,7 +658,7 @@ export default function PassengerBook() {
 
                     <div className="text-center">
                       <span className="font-sans text-4xl font-extrabold text-white">
-                        ${offeredFare.toFixed(2)}
+                        ₦{offeredFare.toLocaleString("en-NG")}
                       </span>
                       <p className="mt-0.5 text-[11px] text-emerald-300">
                         {offeredFare < baseCalculatedFare
@@ -671,7 +671,7 @@ export default function PassengerBook() {
 
                     <button
                       type="button"
-                      onClick={() => adjustFare(1.0)}
+                      onClick={() => adjustFare(100)}
                       className="flex size-12 items-center justify-center rounded-2xl border border-white/10 bg-white/10 text-white transition hover:bg-white/20 active:scale-95"
                     >
                       <FiPlus className="size-5" />
@@ -708,7 +708,7 @@ export default function PassengerBook() {
                   className="mt-6 flex w-full items-center justify-center gap-2 rounded-2xl bg-linear-to-r from-emerald-500 to-teal-500 py-4 text-base font-bold text-slate-950 shadow-xl shadow-emerald-500/25 transition hover:shadow-2xl hover:shadow-emerald-500/40 disabled:opacity-50"
                 >
                   <FiZap className="size-5" />
-                  <span>{loading ? "Broadcasting Ride..." : "Book Ride · Offer $" + offeredFare.toFixed(2)}</span>
+                  <span>{loading ? "Broadcasting Ride..." : "Book Ride · Offer ₦" + offeredFare.toFixed(2)}</span>
                 </motion.button>
               </div>
             ) : (
@@ -732,8 +732,8 @@ export default function PassengerBook() {
                     <div
                       key={i}
                       className={`rounded-2xl border p-4 ${bid.bidder === "driver"
-                          ? "border-amber-500/30 bg-amber-950/20"
-                          : "border-white/10 bg-slate-950/50"
+                        ? "border-amber-500/30 bg-amber-950/20"
+                        : "border-white/10 bg-slate-950/50"
                         }`}
                     >
                       <div className="flex items-center justify-between">
@@ -741,7 +741,7 @@ export default function PassengerBook() {
                           {bid.bidder === "driver" ? "🚗 " + bid.driverName : "🙋 You (Passenger)"}
                         </span>
                         <span className="font-sans text-lg font-extrabold text-emerald-400">
-                          ${bid.amount?.toFixed(2)}
+                          ₦{bid.amount?.toLocaleString("en-NG")}
                         </span>
                       </div>
 
@@ -754,7 +754,7 @@ export default function PassengerBook() {
                           className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-xl bg-emerald-500 py-2 text-xs font-bold text-slate-950 hover:bg-emerald-400"
                         >
                           <FiCheckCircle className="size-4" />
-                          <span>Accept Counter-Offer (${bid.amount?.toFixed(2)})</span>
+                          <span>Accept Counter-Offer (₦{bid.amount?.toLocaleString("en-NG")})</span>
                         </button>
                       )}
                     </div>
@@ -843,8 +843,8 @@ export default function PassengerBook() {
                           )
                         }
                         className={`rounded-full px-3 py-1 text-xs font-semibold transition ${isSelected
-                            ? "bg-amber-400 text-slate-950 font-bold"
-                            : "border border-white/10 bg-white/5 text-slate-400 hover:text-white"
+                          ? "bg-amber-400 text-slate-950 font-bold"
+                          : "border border-white/10 bg-white/5 text-slate-400 hover:text-white"
                           }`}
                       >
                         {tag}

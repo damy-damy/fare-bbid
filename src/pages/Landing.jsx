@@ -1,6 +1,8 @@
+
 import { Link } from "react-router-dom";
 import { motion } from "motion/react";
 import { useState, useEffect } from "react";
+import { FiMenu, FiX } from "react-icons/fi";
 import PageTransition from "../components/PageTransition.jsx";
 import Logo from "../components/Logo.jsx";
 
@@ -68,11 +70,7 @@ const reveal = {
 };
 
 function RideSlideshow() {
-  const images = [
-    "/uber1.jpg",
-    "/uber2.jpg",
-    "/uber3.jpg",
-  ];
+  const images = ["/uber1.jpg", "/uber2.jpg", "/uber3.jpg"];
 
   const [currentImage, setCurrentImage] = useState(0);
 
@@ -92,9 +90,7 @@ function RideSlideshow() {
           src={image}
           alt=""
           aria-hidden="true"
-          className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-1000 ${currentImage === index
-              ? "opacity-100"
-              : "opacity-0"
+          className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-1000 ${currentImage === index ? "opacity-100" : "opacity-0"
             }`}
           style={{
             objectPosition: "center center",
@@ -116,8 +112,8 @@ function RideSlideshow() {
             aria-label={`Show background image ${index + 1}`}
             aria-pressed={currentImage === index}
             className={`h-2.5 rounded-full transition-all duration-300 ${currentImage === index
-                ? "w-7 bg-emerald-400"
-                : "w-2.5 bg-white/70 hover:bg-white"
+              ? "w-7 bg-emerald-400"
+              : "w-2.5 bg-white/70 hover:bg-white"
               }`}
           />
         ))}
@@ -127,35 +123,33 @@ function RideSlideshow() {
 }
 
 export default function Landing() {
+  const [menuOpen, setMenuOpen] = useState(false);
+
   return (
     <PageTransition className="min-h-screen bg-white text-slate-950">
       {/* NAVBAR */}
       <header className="sticky top-0 z-20 border-b border-slate-200/80 bg-white/95 backdrop-blur">
-        <div className="mx-auto flex min-h-[76px] max-w-7xl items-center justify-between gap-4 px-5 sm:px-8">
+        <div className="mx-auto flex min-h-[76px] max-w-7xl items-center justify-between gap-3 px-4 sm:px-8">
           <Logo />
 
+          {/* Desktop navigation */}
           <nav
             className="hidden items-center gap-8 text-sm font-medium text-slate-600 md:flex"
             aria-label="Main navigation"
           >
-            <a
-              className="transition hover:text-emerald-700"
-              href="#how"
-            >
+            <a className="transition hover:text-emerald-700" href="#how">
               How it works
             </a>
 
-            <a
-              className="transition hover:text-emerald-700"
-              href="#roles"
-            >
+            <a className="transition hover:text-emerald-700" href="#roles">
               For drivers and passengers
             </a>
           </nav>
 
-          <div className="flex shrink-0 items-center gap-2">
+          {/* Desktop buttons */}
+          <div className="hidden items-center gap-2 sm:flex">
             <Link
-              className="hidden rounded-full px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100 sm:inline-flex"
+              className="rounded-full px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-100"
               to="/signin"
             >
               Sign in
@@ -168,7 +162,62 @@ export default function Landing() {
               Get started
             </Link>
           </div>
+
+          {/* Mobile menu button */}
+          <button
+            type="button"
+            onClick={() => setMenuOpen(!menuOpen)}
+            className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-800 md:hidden"
+            aria-label={menuOpen ? "Close navigation menu" : "Open navigation menu"}
+            aria-expanded={menuOpen}
+          >
+            {menuOpen ? (
+              <FiX className="size-6" />
+            ) : (
+              <FiMenu className="size-6" />
+            )}
+          </button>
         </div>
+
+        {/* Mobile navigation */}
+        {menuOpen && (
+          <nav
+            className="grid gap-1 border-t border-slate-200 bg-white px-4 py-4 md:hidden"
+            aria-label="Mobile navigation"
+          >
+            <a
+              href="#how"
+              onClick={() => setMenuOpen(false)}
+              className="rounded-xl px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-100"
+            >
+              How it works
+            </a>
+
+            <a
+              href="#roles"
+              onClick={() => setMenuOpen(false)}
+              className="rounded-xl px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-100"
+            >
+              For drivers and passengers
+            </a>
+
+            <Link
+              to="/signin"
+              onClick={() => setMenuOpen(false)}
+              className="rounded-xl px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+            >
+              Sign in
+            </Link>
+
+            <Link
+              to="/signup"
+              onClick={() => setMenuOpen(false)}
+              className="mt-1 rounded-xl bg-emerald-500 px-4 py-3 text-center text-sm font-bold text-white hover:bg-emerald-600"
+            >
+              Get started
+            </Link>
+          </nav>
+        )}
       </header>
 
       <main>
@@ -237,23 +286,17 @@ export default function Landing() {
                 variants={reveal}
               >
                 <span>
-                  <strong className="block text-3xl text-white">
-                    2
-                  </strong>
+                  <strong className="block text-3xl text-white">2</strong>
                   ways to ride
                 </span>
 
                 <span>
-                  <strong className="block text-3xl text-white">
-                    1
-                  </strong>
+                  <strong className="block text-3xl text-white">1</strong>
                   easy app
                 </span>
 
                 <span>
-                  <strong className="block text-3xl text-white">
-                    24/7
-                  </strong>
+                  <strong className="block text-3xl text-white">24/7</strong>
                   your schedule
                 </span>
               </motion.div>
@@ -300,16 +343,11 @@ export default function Landing() {
                   {role.title}
                 </span>
 
-                <p className="mt-5 text-slate-600">
-                  {role.detail}
-                </p>
+                <p className="mt-5 text-slate-600">{role.detail}</p>
 
                 <ul className="mt-6 grid gap-3 border-t border-slate-100 pt-5 text-sm font-medium">
                   {role.bullets.map((bullet) => (
-                    <li
-                      className="flex items-center gap-3"
-                      key={bullet}
-                    >
+                    <li className="flex items-center gap-3" key={bullet}>
                       <span
                         className="grid size-5 shrink-0 place-items-center rounded-full bg-emerald-100 text-xs font-bold text-emerald-700"
                         aria-hidden="true"
@@ -348,13 +386,9 @@ export default function Landing() {
                     {number}
                   </span>
 
-                  <h3 className="mt-3 text-xl font-bold">
-                    {title}
-                  </h3>
+                  <h3 className="mt-3 text-xl font-bold">{title}</h3>
 
-                  <p className="mt-2 leading-7 text-slate-600">
-                    {detail}
-                  </p>
+                  <p className="mt-2 leading-7 text-slate-600">{detail}</p>
                 </li>
               ))}
             </ol>

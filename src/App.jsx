@@ -1,17 +1,4 @@
-// App.jsx is the map of the whole app: which URL shows which page.
-//
-// LESSON 1 - useLocation()
-//   `location` is an object describing the current URL, for example
-//   { pathname: "/signin" }. It changes every time the user moves to
-//   another page.
-//
-// LESSON 2 - Page animations
-//   <AnimatePresence> can only animate a page *out* if it knows the page
-//   is leaving. We give <Routes> the current location and use
-//   location.pathname as its `key`. When the path changes, the key changes,
-//   so React treats it as a new page: the old one plays its `exit`
-//   animation, then the new one plays its `initial -> animate` animation.
-//   mode="wait" means "finish the exit before starting the enter".
+
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AnimatePresence } from "motion/react";
 import ProtectedRoute from "./components/ProtectedRoute.jsx";
@@ -29,14 +16,12 @@ export default function App() {
   return (
     <AnimatePresence mode="wait">
       <Routes location={location} key={location.pathname}>
-        {/* Public pages: anyone can open these */}
+        {/* Public pages */}
         <Route path="/" element={<Landing />} />
         <Route path="/signin" element={<SignIn />} />
         <Route path="/signup" element={<SignUp />} />
-        <Route path="/doctor" element={<Navigate to="/driver" replace />} />
-        <Route path="/patient" element={<Navigate to="/passenger" replace />} />
 
-        {/* Private pages: ProtectedRoute checks the user's role first */}
+        {/* Admin pages */}
         <Route
           path="/admin"
           element={
@@ -45,6 +30,7 @@ export default function App() {
             </ProtectedRoute>
           }
         />
+
         <Route
           path="/admin/ops"
           element={
@@ -53,6 +39,8 @@ export default function App() {
             </ProtectedRoute>
           }
         />
+
+        {/* Driver pages */}
         <Route
           path="/driver"
           element={
@@ -61,6 +49,7 @@ export default function App() {
             </ProtectedRoute>
           }
         />
+
         <Route
           path="/driver/console"
           element={
@@ -69,6 +58,8 @@ export default function App() {
             </ProtectedRoute>
           }
         />
+
+        {/* Passenger pages */}
         <Route
           path="/passenger"
           element={
@@ -77,6 +68,7 @@ export default function App() {
             </ProtectedRoute>
           }
         />
+
         <Route
           path="/passenger/book"
           element={
@@ -86,7 +78,7 @@ export default function App() {
           }
         />
 
-        {/* Any unknown URL goes back to the landing page */}
+        {/* Unknown URLs return to the landing page */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </AnimatePresence>

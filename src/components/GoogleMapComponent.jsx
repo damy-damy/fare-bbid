@@ -86,6 +86,7 @@ export function calculateDistanceKm(point1, point2) {
   if (!values.every(Number.isFinite)) return 0;
 
   const [lat1Value, lng1Value, lat2Value, lng2Value] = values;
+
   const toRadians = (degrees) => (degrees * Math.PI) / 180;
   const earthRadius = 6371;
 
@@ -105,14 +106,25 @@ export function calculateDistanceKm(point1, point2) {
   return Number((earthRadius * c).toFixed(2));
 }
 
+// Fare calculation for FareBid.
 export function calculateFare(distanceKm) {
   const distance = Number(distanceKm);
 
   if (!Number.isFinite(distance) || distance < 0) {
-    return 500;
+    return 1200;
   }
 
-  return Math.round(500 + distance * 200);
+  const baseFare = 800;
+  const pricePerKm = 300;
+  const minimumFare = 1200;
+
+  const calculatedFare = baseFare + distance * pricePerKm;
+
+  // Round up to the nearest ₦100.
+  return Math.max(
+    minimumFare,
+    Math.ceil(calculatedFare / 100) * 100
+  );
 }
 
 function getCoordinates(location) {
@@ -156,8 +168,6 @@ function RouteLine({ pickup, dropoff, driverLocation }) {
 
     route.setMap(map);
 
-    // Recenter when the driver location changes.
-    // Otherwise, show the whole pickup-to-destination route.
     if (driverPosition) {
       map.panTo(driverPosition);
       map.setZoom(15);
@@ -217,6 +227,7 @@ export default function GoogleMapComponent({
 
     const lat =
       typeof latLng.lat === "function" ? latLng.lat() : latLng.lat;
+
     const lng =
       typeof latLng.lng === "function" ? latLng.lng() : latLng.lng;
 
